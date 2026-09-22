@@ -1,6 +1,6 @@
-#VRML_SIM R2023b utf8
+#VRML_SIM R2025a utf8
 
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/robots/dji/mavic/protos/Mavic2Pro.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/dji/mavic/protos/Mavic2Pro.proto"
 
 WorldInfo {
   info [
