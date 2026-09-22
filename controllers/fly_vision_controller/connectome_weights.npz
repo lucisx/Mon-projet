@@ -1,0 +1,188 @@
+import numpy as np
+import pandas as pd
+
+
+# ----------------------------------------------------------------------
+# MODE A : requête directe à neuPrint (aucun fichier a gérer)
+# ----------------------------------------------------------------------
+
+
+def fetch_from_neuprint(token, target_types=("LPLC2",)):
+    """Récupère les neurones LPLC2 et leur connectivité synaptique
+    pondérée (entrées T4/T5 comprises) directement depuis neuPrint."""
+    from neuprint import Client, fetch_neurons, fetch_adjacencies
+    from neuprint import NeuronCriteria as NC
+
+    client = Client("neuprint.janelia.org", dataset="hemibrain:v1.2.1", token=token)
+    # 1. trouver les neurones LPLC2 (le nom exact dans hemibrain est
+    #    bien "LPLC2", pas besoin de regex complexe, mais on garde le
+    #    paramètre au cas où tu veuilles ajouter LPLC1, LC4, LC6...)
+    criteria = NC(type=list(target_types))
+    neurons_df, roi_counts_df = fetch_neurons(criteria)
+    print(f"{len(neurons_df)} neurones trouvés pour {target_types} : "
+          f"bodyIds {neurons_df['bodyId'].tolist()[:5]}...")
+
+    # 2. récupérer TOUTES leurs afférences pondérées (poids = nb de synapses)
+    # Removed sources=NC(status="Traced") as it was likely too restrictive and caused KeyError
+    conn_df, _ = fetch_adjacencies(sources=NC(status="Traced"),
+                                targets=NC(bodyId=neurons_df["bodyId"].tolist()))
+
+    # vérification automatique : si les colonnes ne sont pas les bonnes,
+    # on prend l'autre résultat retourné par fetch_adjacencies
+    if "bodyId_pre" not in conn_df.columns:
+      _, conn_df = fetch_adjacencies(sources=NC(status="Traced"),
+                                    targets=NC(bodyId=neurons_df["bodyId"].tolist()))
+
+    print("DEBUG conn_df columns:", conn_df.columns.tolist())
+
+
+    conn_df = conn_df.groupby(
+        ["bodyId_pre", "bodyId_post"])["weight"].sum().reset_index()
+
+    # 3. identifier spécifiquement les afférences T4/T5 (nos "EMD" biologiques)
+    #    pour vérifier que le circuit qu'on modélise colle à la vraie anatomie
+    pre_criteria = NC(bodyId=conn_df["bodyId_pre"].unique().tolist())
+    pre_neurons_df, _ = fetch_neurons(pre_criteria)
+    t4t5_ids = pre_neurons_df[
+        pre_neurons_df["type"].str.startswith(("T4", "T5"), na=False)
+    ]["bodyId"].tolist()
+    t4t5_fraction = conn_df[conn_df["bodyId_pre"].isin(t4t5_ids)]["weight"].sum() / \
+        max(conn_df["weight"].sum(), 1)
+    print(f"Part des synapses venant de T4/T5 : {t4t5_fraction:.1%} "
+          "(sert à vérifier qu'on cible le bon circuit)")
+
+    return neurons_df, conn_df, roi_counts_df
+
+
+# ----------------------------------------------------------------------
+# MODE B : export CSV téléchargé (ex: FlyWire Codex "connections.csv")
+# format attendu : colonnes pre_root_id, post_root_id, syn_count (adapter
+# selon l'export réel, les noms de colonnes varient selon la version)
+# ----------------------------------------------------------------------
+
+def load_from_flywire_csv(path_neurons, path_connections):
+    neurons_df = pd.read_csv(path_neurons)      # table des identités neuronales
+    conn_df = pd.read_csv(path_connections)     # table des connexions pondérées
+    return neurons_df, conn_df
+
+
+# ----------------------------------------------------------------------
+# ESTIMATION DE L'ANGLE RETINOTOPIQUE
+# Le connectome ne donne pas l'angle du champ visuel directement. On
+# l'approxime ici à partir de la position spatiale 3D du neurone dans
+# le lobe optique (centroïde de ses synapses), projetée sur le plan
+# principal du lobe optique. C'est une APPROXIMATION -- la vraie carte
+# retinotopique vient des papiers d'anatomie (Fischbach & Dittrich).
+# ----------------------------------------------------------------------
+
+def estimate_angle_from_position(neurons_df, x_col="x", y_col="y"):
+    """Si les métadonnées neuPrint incluent des colonnes de position
+    (via roi_info ou une jointure avec les synapses), on en déduit un
+    angle approximatif par centrage + atan2. Sinon, fallback uniforme."""
+    if x_col in neurons_df.columns and y_col in neurons_df.columns:
+        x = neurons_df[x_col].to_numpy() - neurons_df[x_col].mean()
+        y = neurons_df[y_col].to_numpy() - neurons_df[y_col].mean()
+        return np.arctan2(y, x)
+    print("Pas de colonnes de position trouvées : angle uniforme utilisé "
+          "(remplace par la vraie carte retinotopique dès que possible).")
+    return np.linspace(-np.pi, np.pi, len(neurons_df), endpoint=False)
+
+
+# ----------------------------------------------------------------------
+# TRANSFORMATION COMMUNE : connectivité brute -> matrice de poids 1D
+# utilisable par LPLC2Layer.population_weights (poids en fonction de la
+# position angulaire de chaque unité LPLC2 dans le champ visuel).
+# ----------------------------------------------------------------------
+
+def build_weight_profile(neurons_df, conn_df, n_bins=64,
+                          id_col="bodyId", angle_col="rf_angle"):
+    if angle_col in neurons_df.columns:
+        angles = neurons_df[angle_col].to_numpy()
+    else:
+        angles = estimate_angle_from_position(neurons_df)
+
+    # poids synaptique total reçu par chaque neurone LPLC2 (proxy d'influence
+    # -- un LPLC2 avec plus d'entrées T4/T5 pèse plus dans la population)
+    total_weight = (conn_df.groupby("bodyId_post")["weight"].sum()
+                     if "bodyId_post" in conn_df.columns else None)
+
+    weight_profile = np.zeros(n_bins)
+    bin_edges = np.linspace(-np.pi, np.pi, n_bins + 1)
+
+    for i, (body_id, angle) in enumerate(zip(neurons_df[id_col], angles)):
+        bin_idx = np.digitize(angle, bin_edges) - 1
+        bin_idx = np.clip(bin_idx, 0, n_bins - 1)
+        w = total_weight.get(body_id, 1.0) if total_weight is not None else 1.0
+        weight_profile[bin_idx] += w
+
+    # normaliser comme dans population_weights (somme = 1)
+    if weight_profile.sum() > 0:
+        weight_profile /= weight_profile.sum()
+    else:
+        weight_profile[:] = 1.0 / n_bins
+
+    return weight_profile
+
+
+def save_weights(weight_profile, out_path="connectome_weights.npz"):
+    np.savez(out_path, population_weights=weight_profile)
+    print(f"Poids sauvegardés dans {out_path}")
+    print("-> dans fly_vision_drone_sim.py, remplace LPLC2Layer.__init__ par :")
+    print("   data = np.load('connectome_weights.npz')")
+    print("   self.population_weights = data['population_weights']")
+
+
+# ----------------------------------------------------------------------
+# EXEMPLE D'USAGE
+# ----------------------------------------------------------------------
+
+if __name__ == "__main__":
+
+    neurons_df, conn_df, roi_df = fetch_from_neuprint(token="5841f7bca4e0327d2cabd138d42640234abe4ac306c4eafab4e6e904cb40ab93")
+    
+    import numpy as np
+
+    has_soma = neurons_df["somaLocation"].notna()
+    n_missing = (~has_soma).sum()
+    if n_missing > 0:
+        print(f"{n_missing} neurone(s) sans somaLocation, exclus du calcul d'angle.")
+
+    neurons_df = neurons_df[has_soma].reset_index(drop=True)
+    conn_df = conn_df[conn_df["bodyId_post"].isin(neurons_df["bodyId"])].reset_index(drop=True)
+
+    coords = np.array(neurons_df["somaLocation"].tolist())
+    neurons_df["x"] = coords[:, 0]
+    neurons_df["y"] = coords[:, 1]
+
+
+    profile = build_weight_profile(neurons_df, conn_df)
+    save_weights(profile, out_path="/content/connectome_weights.npz")
+
+
+
+    
+    # Display fetched data
+    print("Fetched neurons_df head:")
+    display(neurons_df.head())
+    print("\nFetched conn_df head:")
+    display(conn_df.head())
+
+    # --- Mode B (si tu as des CSV téléchargés localement) ---
+    # neurons_df, conn_df = load_from_flywire_csv(
+    #     "neurons.csv", "connections.csv")
+
+    # --- Démo avec données factices pour vérifier que le pipeline tourne ---
+    # demo_neurons = pd.DataFrame({
+    #     "bodyId": range(20),
+    #     "type": ["LPLC2"] * 20,
+    #     "rf_angle": np.linspace(-np.pi, np.pi, 20, endpoint=False),
+    # })
+    # demo_conn = pd.DataFrame({
+    #     "bodyId_pre": np.random.randint(1000, 2000, 60),
+    #     "bodyId_post": np.random.choice(range(20), 60),
+    #     "weight": np.random.randint(1, 30, 60),
+    # })
+
+    # profile = build_weight_profile(demo_neurons, demo_conn)
+    profile = build_weight_profile(neurons_df, conn_df)
+    save_weights(profile, out_path="/content/connectome_weights.npz")
