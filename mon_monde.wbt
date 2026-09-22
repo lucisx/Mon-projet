@@ -1,0 +1,136 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "webots://projects/robots/dji/mavic/protos/Mavic2Pro.proto"
+EXTERNPROTO "webots://projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "webots://projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "webots://projects/objects/floors/protos/RectangleArena.proto"
+
+WorldInfo {
+  info [
+    "Simulation bio-inspiree : drone Mavic2Pro pilote par circuit EMD/LPLC2"
+  ]
+  basicTimeStep 16
+}
+Viewpoint {
+  orientation -0.3 0.3 0.9 1.2
+  position -8 -8 5
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+  floorSize 40 40
+  floorTileSize 4 4
+}
+
+Mavic2Pro {
+  translation -18 0 0.1
+  rotation 0 0 1 0
+  name "drone"
+  controller "fly_vision_controller"
+  cameraSlot [
+    Camera {
+      name "camera"
+      width 128
+      height 64
+      fieldOfView 1.5
+    }
+  ]
+}
+
+Solid {
+  translation -12 14.3 1
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.8 0.2 0.2 }
+      geometry Sphere { radius 0.8 }
+    }
+  ]
+  name "obstacle_1"
+  boundingObject Sphere { radius 0.8 }
+}
+
+Solid {
+  translation -4 12.8 1
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.8 0.2 0.2 }
+      geometry Sphere { radius 0.8 }
+    }
+  ]
+  name "obstacle_2"
+  boundingObject Sphere { radius 0.8 }
+}
+
+Solid {
+  translation 4 9.7 1
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.8 0.2 0.2 }
+      geometry Sphere { radius 0.8 }
+    }
+  ]
+  name "obstacle_3"
+  boundingObject Sphere { radius 0.8 }
+}
+
+Solid {
+  translation 8 4.0 1
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.8 0.2 0.2 }
+      geometry Sphere { radius 0.8 }
+    }
+  ]
+  name "obstacle_4"
+  boundingObject Sphere { radius 0.8 }
+}
+
+Solid {
+  translation -11 -1.5 1
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.8 0.2 0.2 }
+      geometry Sphere { radius 0.8 }
+    }
+  ]
+  name "obstacle_5"
+  boundingObject Sphere { radius 0.8 }
+}
+
+Solid {
+  translation 8 -1.8 1
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.8 0.2 0.2 }
+      geometry Sphere { radius 0.8 }
+    }
+  ]
+  name "obstacle_6"
+  boundingObject Sphere { radius 0.8 }
+}
+
+Solid {
+  translation -2 -8.2 1
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.8 0.2 0.2 }
+      geometry Sphere { radius 0.8 }
+    }
+  ]
+  name "obstacle_7"
+  boundingObject Sphere { radius 0.8 }
+}
+
+Solid {
+  translation 1.5 -13.0 1
+  children [
+    Shape {
+      appearance PBRAppearance { baseColor 0.8 0.2 0.2 }
+      geometry Sphere { radius 0.8 }
+    }
+  ]
+  name "obstacle_8"
+  boundingObject Sphere { radius 0.8 }
+}
